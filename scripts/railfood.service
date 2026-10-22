@@ -1,0 +1,34 @@
+[Unit]
+Description=RailFood FastAPI Backend Service (Station-to-Seat Portal)
+After=network.target
+
+[Service]
+# Default AWS Ubuntu user; if using Amazon Linux, change to ec2-user
+User=ubuntu
+Group=www-data
+WorkingDirectory=/home/ubuntu/railfood/backend
+
+# Virtual environment python binary and uvicorn runner
+Environment="PATH=/home/ubuntu/railfood/backend/venv/bin:$PATH"
+EnvironmentFile=-/home/ubuntu/railfood/backend/.env
+
+# Optimized for AWS EC2 Free Tier (t2.micro / t3.micro with 1-2 vCPUs and 1GB RAM)
+# 2 workers provide resilience without overloading 1GB RAM
+ExecStart=/home/ubuntu/railfood/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='*'
+
+# Auto-restart policies on crash
+Restart=always
+RestartSec=5
+KillSignal=SIGQUIT
+TimeoutStopSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=railfood-backend
+
+# File descriptor limits for high concurrency
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

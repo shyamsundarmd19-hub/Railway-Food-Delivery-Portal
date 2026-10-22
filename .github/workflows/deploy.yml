@@ -1,0 +1,83 @@
+name: RailFood CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # 1. Continuous Integration (Lint, Unit & Integration Tests, Frontend Build)
+  # ============================================================================
+  test:
+    name: Build & Test (Backend + Frontend)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Backend Test Setup
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run Backend Integration & DB Tests
+        run: |
+          cd backend
+          python -m tests.test_api
+
+      # Frontend Build Setup
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package.json
+
+      - name: Install Frontend Dependencies & Validate Build
+        run: |
+          cd frontend
+          npm ci || npm install
+          npm run build
+
+  # ============================================================================
+  # 2. Continuous Deployment to AWS EC2 (Bare-Metal / No Docker)
+  # ============================================================================
+  deploy:
+    name: Deploy to AWS EC2 via SSH
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH Key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 Host Key to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Execute Remote Deployment Script
+        run: |
+          ssh ${{ secrets.EC2_USER || 'ubuntu' }}@${{ secrets.EC2_HOST }} 'bash -s' << 'EOF'
+            set -e
+            echo "--> Connecting to RailFood EC2 instance..."
+            cd /home/ubuntu/railfood
+            sudo bash scripts/deploy.sh
+          EOF
